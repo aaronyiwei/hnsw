@@ -33,3 +33,5 @@
 
 # bazel
 /bazel-*
+build
+.vscode/

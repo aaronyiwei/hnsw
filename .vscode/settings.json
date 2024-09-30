@@ -67,6 +67,10 @@
         "execution": "cpp",
         "ios": "cpp",
         "locale": "cpp",
-        "print": "cpp"
+        "print": "cpp",
+        "__config": "cpp",
+        "complex": "cpp",
+        "cstdarg": "cpp",
+        "sstream": "cpp"
     }
 }

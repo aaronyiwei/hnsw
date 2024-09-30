@@ -1,18 +1,60 @@
 #include "hnsw.h"
 
 #include <algorithm>
+#include <cassert>
 #include <ctime>
 #include <iostream>
 #include <utility>
 #include <random>
 #include <vector>
 #include <math.h>
-struct LVQData {
-    float scale_,bias_;
-    std::pair<double, double> local_cache_;
-    int8_t compress_vec_[];
-    //int8_t
-};
+#include <cstdio>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
+#include <sys/time.h>
+size_t max_d,max_n;
+
+double* fvecs_read(const char* fname, size_t* d_out, size_t* n_out) {
+    FILE* f = fopen(fname, "r");
+    if (!f) {
+        fprintf(stderr, "could not open %s\n", fname);
+        perror("");
+        abort();
+    }
+    int d;
+    fread(&d, 1, sizeof(int), f);
+    assert((d > 0 && d < 1000000) || !"unreasonable dimension");
+    fseek(f, 0, SEEK_SET);
+    struct stat st;
+    fstat(fileno(f), &st);
+    size_t sz = st.st_size;
+    assert(sz % ((d + 1) * 4) == 0 || !"weird file size");
+    size_t n = sz / ((d + 1) * 4);
+
+    *d_out = d;
+    *n_out = n;
+    double* x = new double[n * (d + 1)];
+    size_t nr = fread(x, sizeof(double), n * (d + 1), f);
+    assert(nr == n * (d + 1) || !"could not read whole file");
+
+    // shift array to remove row headers
+    for (size_t i = 0; i < n; i++)
+        memmove(x + i * d, x + 1 + i * (d + 1), d * sizeof(*x));
+
+    fclose(f);
+    return x;
+}
+// not very clean, but works as long as sizeof(int) == sizeof(float)
+int* ivecs_read(const char* fname, size_t* d_out, size_t* n_out) {
+    return (int*)fvecs_read(fname, d_out, n_out);
+
+}
+double elapsed(){
+    struct timeval tv;
+    gettimeofday(&tv, nullptr);
+    return (tv.tv_sec + tv.tv_usec * 1e-6);
+}
 std::pair<double, double> MakeLocalCache(const int8_t *c, double scale, double dim) {
         int norm1 = 0;
         int norm2 = 0;
@@ -22,14 +64,14 @@ std::pair<double, double> MakeLocalCache(const int8_t *c, double scale, double d
         }
         return {norm1 * scale, norm2 * scale * scale};
     }
- void CompressTo(const Point src, LVQData& dest, const double *mean_, int dim) const {
+ void CompressTo(const double* src, LVQData& dest, const double *mean_, int dim) {
 
         //int8_t *compress = dest.compress_vec_;
 
         double lower = std::numeric_limits<double>::max();
         double upper = -std::numeric_limits<double>::max();
         for (int j = 0; j < dim; ++j) {
-            auto x = static_cast<double>(src.values[j]-mean_[j]);
+            auto x = static_cast<double>(src[j]-mean_[j]);
             lower = std::min(lower, x);
             upper = std::max(upper, x);
         }
@@ -40,7 +82,7 @@ std::pair<double, double> MakeLocalCache(const int8_t *c, double scale, double d
         } else {
             double scale_inv = 1 / scale;
             for (int j = 0; j < dim; ++j) {
-                auto c = std::floor((src.values[j] - mean_[j] - bias) * scale_inv + 0.5);
+                auto c = std::floor((src[j] - mean_[j] - bias) * scale_inv + 0.5);
                 //assert(c <= std::numeric_limits<CompressType>::max() && c >= std::numeric_limits<CompressType>::min());
                 dest.compress_vec_[j] = c;
             }
@@ -48,12 +90,14 @@ std::pair<double, double> MakeLocalCache(const int8_t *c, double scale, double d
         dest.scale_ = scale;
         dest.bias_ = bias;
         dest.local_cache_ = MakeLocalCache(dest.compress_vec_, scale, dim);
-    }
+}
+/*
 void RandomTest(int numItems, int dim, int numQueries, int K) {
     std::default_random_engine generator;
     std::uniform_real_distribution<double> distribution(0.0,1.0);
-    std::vector<Point> random_items;
+    std::vector<Point> random_items, queryv;
     double new_mean[dim+1];
+    memset(new_mean,0.0,sizeof(new_mean));
     int cur_vec_num = 0;
     for (int i = 0; i < numItems; i++) {
         std::vector<double> temp(dim);
@@ -64,36 +108,46 @@ void RandomTest(int numItems, int dim, int numQueries, int K) {
         cur_vec_num += numItems;
         random_items.emplace_back(temp);
     }
-    std::random_shuffle(random_items.begin(), random_items.end());
+     std::random_shuffle(random_items.begin(), random_items.end());
     for (int i = 0; i < dim; ++i) {
         new_mean[i] /= cur_vec_num;
     }
     // construct graph
-    HNSWGraph my_hnswgraph(10, 30, 30, 10, 2);
     std::vector<LVQData> compress_items;
+    HNSWGraph my_hnswgraph(10, 30, 30, 10, 2);
     for (int i = 0; i < numItems; i++) {
         if (i % 10000 == 0) std::cout << i << std::endl;
 
         CompressTo(random_items[i], compress_items[i], new_mean, dim);
-        my_hnswgraph.Insert(compress_items[i]);
+        my_hnswgraph.Insert(compress_items[i], new_mean);
     }
 
     double total_brute_force_time = 0.0;
     double total_hnsw_time = 0.0;
 
     std::cout << "START QUERY" << std::endl;
-    int numHits = 0;
+    int numHits = 0, cur_quevec_num=0;
+    double query_mean[dim+1];
+    memset(query_mean,0.0,sizeof(query_mean));
     for (int i = 0; i < numQueries; i++) {
         // Generate random query
         std::vector<double> temp(dim);
         for (int d = 0; d < dim; d++) {
             temp[d] = distribution(generator);
+            query_mean[i] += temp[d];
         }
+        cur_quevec_num += numQueries;
+        queryv.emplace_back(temp);
         //CompressTo(vec, query.inner_.get());
-        //return query;
+        //return query; 
     }
-        Point query(temp);
-
+    for (int i = 0; i < dim; ++i) {
+        query_mean[i] /= cur_quevec_num;
+    }
+    std::vector<LVQData> compress_queries;
+    for(int i = 0; i < numQueries; i++){
+        //Point query(temp);
+        CompressTo(queryv[i], compress_queries[i], query_mean, dim);
         // Brute force
         clock_t begin_time = clock();
         std::vector<std::pair<double, int>> distPairs;
@@ -105,15 +159,128 @@ void RandomTest(int numItems, int dim, int numQueries, int K) {
         total_brute_force_time += double( clock () - begin_time ) /  CLOCKS_PER_SEC;
 
         begin_time = clock();
-        std::vector<int> knns = my_hnswgraph.KNNSearch(query, K);
+        std::vector<int> knns = my_hnswgraph.KNNSearch(compress_queries[i], K, new_mean, query_mean);
         total_hnsw_time += double( clock () - begin_time ) /  CLOCKS_PER_SEC;
 
         if (knns[0] == distPairs[0].second) numHits++;
     }
     std::cout << numHits << " " << total_brute_force_time / numQueries  << " " << total_hnsw_time / numQueries << std::endl;
 }
-
+*/
 int main() {
-    RandomTest(10000, 4, 100, 5);
+    //RandomTest(10000, 4, 100, 5);
+    int dim = 128;               // Dimension of the elements
+    int max_elements = 1000000;   
+    int M = 128 ;                 // Tightly connected with internal dimensionality of the data
+                                // strongly affects the memory consumption
+    int ef_construction = 200;  // Controls index search speed/build speed tradeoff
+    double* x;
+    // Initing index
+    double new_mean[dim+1];
+    memset(new_mean,0.0,sizeof(new_mean));
+    int cur_vec_num = 0;
+    //x=fvecs_read("/home/infominer/aaron/dataset/sift1M/sift_base.fvecs",&max_d,&max_n);
+    x=fvecs_read("/Users/aaron/Downloads/siftsmall/siftsmall_base.fvecs",&max_d,&max_n);
+    for(int i = 0; i < max_n; i++){
+        for (int d = 0; d < dim; d++) {
+            new_mean[d] += x[d];
+        }
+        cur_vec_num += max_n;
+
+    }
+    for(int i = 0; i < dim; ++i) {
+        new_mean[i] /= cur_vec_num;
+    }
+    std::vector<LVQData> compress_items;
+    HNSWGraph my_hnswgraph(128, 128, 128, 200, 128);
+    for (int i = 0; i < max_n; i++) {
+        if (i % 10000 == 0) std::cout << i << std::endl;
+        CompressTo(x + i * max_d, compress_items[i], new_mean, dim);
+        my_hnswgraph.Insert(compress_items[i], new_mean);
+    }
+    /*
+    std::string hnsw_path = "hnsw.bin";
+    alg_hnsw->saveIndex(hnsw_path);
+    delete alg_hnsw;*/
+
+    delete[] x;
+
+
+
+
+
+
+    // this is typically the fastest one.
+    const char* index_key = "IVF4096,Flat";
+
+    // these ones have better memory usage
+    // const char *index_key = "Flat";
+    // const char *index_key = "PQ32";
+    // const char *index_key = "PCA80,Flat";
+    // const char *index_key = "IVF4096,PQ8+16";
+    // const char *index_key = "IVF4096,PQ32";
+    // const char *index_key = "IMI2x8,PQ32";
+    // const char *index_key = "IMI2x8,PQ8+16";
+    // const char *index_key = "OPQ16_64,IMI2x8,PQ8+16";
+
+    size_t nq,d2;
+    double* xq;
+    double t0 = elapsed();
+    {
+        printf("[%.3f s] Loading queries\n", elapsed() - t0);
+
+        //xq = fvecs_read("/home/infominer/aaron/dataset/sift1M/sift_query.fvecs", &d2, &nq);
+        xq = fvecs_read("/Users/aaron/Downloads/siftsmall/siftsmall_query.fvecs", &d2, &nq);
+    }
+    size_t k,nq2;         // nb of results per query in the GT
+    int* gt; // nq * k matrix of ground-truth nearest-neighbors
+    {
+        printf("[%.3f s] Loading ground truth for %ld queries\n",
+               elapsed() - t0,
+               nq);
+
+        // load ground-truth and convert int to long
+        //gt = ivecs_read("/home/infominer/aaron/dataset/sift1M/sift_groundtruth.ivecs", &k, &nq2);
+        gt = ivecs_read("/Users/aaron/Downloads/siftsmall/siftsmall_groundtruth.ivecs", &k, &nq2);
+        assert(nq2 == nq || !"incorrect nb of ground truth entries");
+    }
+    { // Use the found configuration to perform a search
+        printf("[%.3f s] Perform a search on %ld queries\n",
+               elapsed() - t0,
+               nq);
+
+        // output buffers
+        double t1=elapsed();
+        int correct=0,cnt=0;
+        int numHits = 0, cur_quevec_num=0;
+        double query_mean[dim+1];
+        std::vector<LVQData> compress_queries;
+        memset(query_mean,0.0,sizeof(query_mean));
+        for (int i = 0; i < nq; i++) {
+            std::vector<double> temp(dim);
+            for (int d = 0; d < dim; d++) {
+                query_mean[i] += xq[d];
+            }
+            cur_quevec_num += nq;
+        //CompressTo(vec, query.inner_.get());
+        //return query; 
+        }
+        for (int i = 0; i < dim; ++i) {
+            query_mean[i] /= cur_quevec_num;
+        }
+        for (size_t i = 0; i < nq; i++) {
+            CompressTo(xq + i * d2, compress_queries[i], query_mean, dim);
+            std::vector<int> knns = my_hnswgraph.KNNSearch(compress_queries[i], 128, new_mean, query_mean);
+            
+            if (knns[0] == gt[cnt]) numHits++;
+            cnt+=k;
+        }
+        printf("[%.3f s] Compute recalls\n", elapsed() - t1);
+        //for(int i=0; i<k; i++) std::cout<<gt[i]<<std::endl;
+        std::cout<<nq*k<<' '<<d2<<std::endl;
+        printf("%.4f\n", numHits / double(nq));
+    }
+    delete[] xq;
+    delete[] gt;
     return 0;
 }
