@@ -57,8 +57,8 @@ double elapsed(){
     return (tv.tv_sec + tv.tv_usec * 1e-6);
 }
 std::pair<float, float> MakeLocalCache(const int8_t *c, float scale, int dim) {
-        int norm1 = 0;
-        int norm2 = 0;
+        int64_t norm1 = 0;
+        int64_t norm2 = 0;
         for (int i = 0; i < dim; ++i) {
             norm1 += c[i];
             norm2 += c[i] * c[i];
@@ -66,7 +66,21 @@ std::pair<float, float> MakeLocalCache(const int8_t *c, float scale, int dim) {
         return {norm1 * scale, norm2 * scale * scale};
     }
  void CompressTo(const float* src, LVQData& dest, const float *mean_, int dim) {
-
+        if (true) {
+            float norm = 0;
+            float *src_without_const = const_cast<float *>(src);
+            for (int j = 0; j < dim; ++j) {
+                norm += src_without_const[j] * src_without_const[j];
+            }
+            norm = std::sqrt(norm);
+            if (norm == 0) {
+                std::fill(dest.compress_vec_, dest.compress_vec_ + dim, 0);
+            } else {
+                for (int j = 0; j < dim; ++j) {
+                    src_without_const[j] /= norm;
+                }
+            }
+        }
         //int8_t *compress = dest.compress_vec_;
 
         float lower = std::numeric_limits<float>::max();
@@ -77,22 +91,14 @@ std::pair<float, float> MakeLocalCache(const int8_t *c, float scale, int dim) {
             upper = std::max(upper, x);
         }
         float scale = (upper - lower) / 255;
-        float bias = lower - std::numeric_limits<float>::min() * scale;
+        float bias = lower - std::numeric_limits<int8_t>::min() * scale;
         if (scale == 0) {
             std::fill(dest.compress_vec_, dest.compress_vec_ + dim, 0);
         } else {
             float scale_inv = 1 / scale;
             for (int j = 0; j < dim; ++j) {
-                auto c = scale*std::floor((src[j] - mean_[j] - bias) * scale_inv + 0.5);
-                //auto c = std::floor((src[j] - mean_[j] - bias) * scale_inv + 0.5);
-                //assert(c <= std::numeric_limits<CompressType>::max() && c >= std::numeric_limits<CompressType>::min());
+                auto c = std::floor((src[j] - mean_[j] - bias) * scale_inv + 0.5);
                 dest.compress_vec_[j] = c;
-            }
-            float scaleres=scale / 255;
-            float scaleres_inv=1 / scaleres;
-            for (int j = 0; j < dim; ++j){
-                auto c=scaleres*std::floor((src[j]-dest.compress_vec_[j]+scale/2) * scaleres_inv + 0.5);
-                dest.compress_vec_[j] += c;
             }
         }
         dest.scale_ = scale;
@@ -109,26 +115,28 @@ int main() {
     int ef_construction = 200;  // Controls index search speed/build speed tradeoff
     float* x;
     // Initing index
-    float new_mean[dim+1];
-    memset(new_mean,0.0,sizeof(new_mean));
+    float mean[dim+1];
+    memset(mean,0.0,sizeof(mean));
     int cur_vec_num = 0;
     x=fvecs_read("/home/infominer/aaron/dataset/siftsmall/siftsmall_base.fvecs",&max_d,&max_n);
     //x=fvecs_read("/Users/aaron/Downloads/siftsmall/siftsmall_base.fvecs",&max_d,&max_n);
     for(int i = 0; i < max_n; i++){
+        float * xv = x + i * max_d;
         for (int d = 0; d < max_d; d++) {
-            new_mean[d] += x[d];
+            mean[d] += xv[d];
         }
-        //cur_vec_num += max_n;
+        cur_vec_num += max_d;
     }
     for(int i = 0; i < dim; ++i) {
-        new_mean[i] /= max_n;
+        mean[i] =0; // /= max_n;
     }
+    std::cout<<std::endl;
     std::vector<LVQData> compress_items(max_n);
     HNSWGraph my_hnswgraph(10, 30, 30, 100, 5);
     for (int i = 0; i < max_n; i++) {
         if (i % 1000 == 0) std::cout << i << std::endl;
-        CompressTo(x + i * max_d, compress_items[i], new_mean, dim);
-        my_hnswgraph.Insert(compress_items[i], new_mean);
+        CompressTo(x + i * max_d, compress_items[i], mean, dim);
+        my_hnswgraph.Insert(compress_items[i], mean);
     }
     /*
     std::string hnsw_path = "hnsw.bin";
@@ -138,22 +146,6 @@ int main() {
     delete[] x;
     //delete compress_items;
 
-
-
-
-
-    // this is typically the fastest one.
-    const char* index_key = "IVF4096,Flat";
-
-    // these ones have better memory usage
-    // const char *index_key = "Flat";
-    // const char *index_key = "PQ32";
-    // const char *index_key = "PCA80,Flat";
-    // const char *index_key = "IVF4096,PQ8+16";
-    // const char *index_key = "IVF4096,PQ32";
-    // const char *index_key = "IMI2x8,PQ32";
-    // const char *index_key = "IMI2x8,PQ8+16";
-    // const char *index_key = "OPQ16_64,IMI2x8,PQ8+16";
 
     size_t nq,d2;
     float* xq;
@@ -185,25 +177,13 @@ int main() {
         double t1=elapsed();
         int correct=0,cnt=0;
         int numHits = 0, cur_quevec_num=0;
-        float query_mean[d2+1];
-        std::vector<LVQData> compress_queries(nq+1);/*
-        memset(query_mean,0.0,sizeof(query_mean));
-        
+        std::vector<LVQData> compress_queries(nq+1);
+        std::cout<<nq<<std::endl;
         for (int i = 0; i < nq; i++) {
-            for (int d = 0; d < d2; d++) {
-                query_mean[i] += xq[d];
-            }
-            cur_quevec_num += d2;
-        }
-        for (int i = 0; i < d2; ++i) {
-            //query_mean[i] /= cur_quevec_num;
-            query_mean[i]=0;
-        }*/
-        for (int i = 0; i < nq; i++) {
-            //CompressTo(xq + i * d2, compress_queries[i], query_mean, d2);
-            //std::vector<int> knns = my_hnswgraph.KNNSearch(compress_queries[i], 200, new_mean, query_mean);
-            std::vector<int> knns = my_hnswgraph.KNNSearch(xq + i * d2, 100, new_mean, query_mean);
-            //std::cout<<knns[0]<<' '<<gt[cnt]<<std::endl;
+            CompressTo(xq + i * d2, compress_queries[i], mean, d2);
+            std::vector<int> knns = my_hnswgraph.KNNSearch(compress_queries[i], 100, mean);
+            //std::vector<int> knns = my_hnswgraph.KNNSearch(xq + i * d2, 100, mean, query_mean);
+            std::cout<<knns[0]<<' '<<gt[cnt]<<std::endl;
             if (knns[0] == gt[cnt]) numHits++;
             cnt+=k;
         }

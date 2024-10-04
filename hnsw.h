@@ -62,11 +62,10 @@ struct HNSWGraph {
 
     // methods
     void AddEdge(int st, int ed, int lc);
-    std::vector<int> SearchLayer(float* q, int ep, int ef, int lc, float* mean, float* qmean);
-    std::vector<int> SearchLayer2(LVQData& q, int ep, int ef, int lc, float* mean, float* qmean);
+    std::vector<int> SearchLayer(LVQData& q, int ep, int ef, int lc, float* mean);
     void Insert(LVQData& q, float* mean);
     //void CompressTo()
-    std::vector<int> KNNSearch(float* q, int K, float* mean, float* qmean);
+    std::vector<int> KNNSearch(LVQData& q, int K, float* mean);
 
     void PrintGraph() {
         for (int l = 0; l < layer_edgeLists_.size(); l++) {
