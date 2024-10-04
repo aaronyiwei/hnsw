@@ -31,7 +31,5 @@
 *.out
 *.app
 
-# bazel
-/bazel-*
 build
 .vscode/
