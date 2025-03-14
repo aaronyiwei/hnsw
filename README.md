@@ -1,6 +1,4 @@
-![image](https://github.com/user-attachments/assets/c1fde5fa-c09b-40c9-a075-32f5c72ccdf0)![image](https://github.com/user-attachments/assets/6c2c1c1f-3c49-4f52-a706-cffe7de80f13)<p align="center">
- <b> Optimized implementation of HNSW with LVQ approach </b>
-</p>
+
 
 ## Introduction
 
