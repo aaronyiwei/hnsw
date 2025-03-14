@@ -13,9 +13,9 @@
     Dataset                 | SIFT_10K   | SIFT_10K
     Dimension               | 128        | 128   
     Number of Vectors       | 10000      | 10000
-    Number of Queries       | 100	         | 100
-    Distance	        | L2        |	L2
-    Recall	                | 100%      | 98%
+    Number of Queries       | 100	     | 100
+    Distance	        | L2          |	L2
+    Recall	                | 100%        | 98%
     Average Sum Latency(s)  | 1.80        |	1.27
 
 
