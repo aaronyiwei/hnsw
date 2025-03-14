@@ -16,7 +16,7 @@
     Number of Queries       | 100	       | 100
     Distance	        | L2         |	L2
     Recall	                | 100%       | 98%
-    Average Sum Latency(s)  |1.80       |	1.27
+    Average Sum Latency(s)  | 1.80        |	1.27
 
 
 ## 
