@@ -1,5 +1,4 @@
 
-
 ## Introduction
 
  The optimization technique for vector databases in ANN search algorithms, specially with aim to enhance HNSW (Hierarchical Navigable Small World) algorithm. The proposed method employ Locally-adaptive Vector Quantization (LVQ) to compress individual vector sizes, and as a result, significantly reduces memory overhead. Building on conventional practices, the paper integrates optimization technique and evaluates them on the Sift dataset. Theoretical analysis and experimental results demonstrate that the proposed method achieves noticeable performance improvements in memory efficiency with only limited precision loss for TOP1 vector retrieval, and meanwhile partially reducing time complexity.
@@ -86,7 +85,48 @@ KNNSearch(Object &q, int K) {
 }
 
 ```
-### Testing Results
+
+
+    LVQ Implementation
+
+Aiming to convert vectors from floating-point numbers to compressed integers by the following quantization technique to reduce time complexity and memery consumption. 
+The compressed vector structure is constructed as shown below.
+
+
+```
+Δ*⌊︃ (x- MINi)/ Δ+0.5⌋︃+MINi,    Δ= (MAXi- MINi)/255
+```
+
+```C++
+struct LVQData {
+	float scale_, bias_;
+	int8_t compress_vec_[130];
+};
+```
+```C++
+    float lower = std::numeric_limits<float>::max();
+    float upper = -std::numeric_limits<float>::max();
+    for (int j = 0; j < dim; ++j) {
+        auto x = static_cast<float>(src[j] - mean_[j]);
+        lower = std::min(lower, x);
+        upper = std::max(upper, x);
+    }
+    float scale = (upper - lower) / 255;
+    float bias = lower - std::numeric_limits<int8_t>::min() * scale;
+    if (scale == 0) {
+        std::fill(dest.compress_vec_, dest.compress_vec_ + dim, 0);
+    } else {
+        float scale_inv = 1 / scale;
+        for (int j = 0; j < dim; ++j) {
+            auto c = std::floor((src[j] - mean_[j] - bias) * scale_inv + 0.5);
+            dest.compress_vec_[j] = c;
+        }
+    }
+```
+
+
+    
+### Experimental Results
 
 
                             | Plain HNSW | Optimal HNSW
@@ -98,7 +138,13 @@ KNNSearch(Object &q, int K) {
     Recall	                | 100%       | 98%
     Average Sum Latency(s)  | 1.80       |	1.27
 
-
-
-
+### Compile
+Runtime environment：Ubuntu 23.04，16G Memory，AMD Ryzen 7 5800H CPU，Compiler: Clang 18
+```
+cmake ..
+```
 ## Improvements
+
+In the future, in-memory pre-storage of large-scale vectors should be implemented, so as to adapt to SIFT_1M and draw more rigorous conclusions.
+
+The practice of residual quantization is also one of the directions for improvements , and we believe that 98% recall for 10k vectors is far from the ultimate target of the project.
