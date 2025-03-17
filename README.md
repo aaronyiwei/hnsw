@@ -115,7 +115,7 @@ struct LVQData {
     Number of Queries       | 100	     | 100
     Distance	        | L2         |	L2
     Recall	                | 100%       | 98%
-    Average Sum Latency(s)  | 1.80       |	1.27
+    Average Sum Latency(s)  | 0.844      |	0.124
 
 ### Compile
 Runtime environment：Ubuntu 23.04，16G Memory，AMD Ryzen 7 5800H CPU，Compiler: Clang 18
